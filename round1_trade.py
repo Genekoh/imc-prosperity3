@@ -153,13 +153,14 @@ logger = Logger()
 class Trader:
     def __init__(self):
 
-        self.ema_factor = 0.5
-        self.resin_factor = 3
-        self.kelp_factor = 1
-        self.squidink_factor = 1
+        self.ema_factor = 0.6
+        #  ema_factor = 2 / (period + 1)
+        self.resin_period = 7 / 3
+        self.kelp_period = 7 / 3
+        self.squidink_period = 7 / 3
 
-        self.resin_spread = 1
-        self.kelp_spread = 2
+        self.resin_spread = 2
+        self.kelp_spread = 0
         self.squidink_spread = 2
         # self.spread = 2
 
@@ -288,12 +289,12 @@ class Trader:
     def run(self, state: TradingState):
         # store all state that needs to be preserved in the state.traderData variable
         storedData = {
-            RESIN: {"midprice": None, "ema": None, "ema_factor": self.resin_factor},
-            KELP: {"midprice": None, "ema": None, "ema_factor": self.kelp_factor},
+            RESIN: {"midprice": None, "ema": None, "ema_factor": self.resin_period},
+            KELP: {"midprice": None, "ema": None, "ema_factor": self.kelp_period},
             SQUIDINK: {
                 "midprice": None,
                 "ema": None,
-                "ema_factor": self.squidink_factor,
+                "ema_factor": self.squidink_period,
                 # "fast_ema": None,
                 # "slow_ema": None,
             },
