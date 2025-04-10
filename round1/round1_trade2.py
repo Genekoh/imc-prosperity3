@@ -156,14 +156,15 @@ class Trader:
         self.ema_factor = 0.6
         #  ema_factor = 2 / (period + 1)
         self.resin_factor = 0.00985
-        self.kelp_factor = 0.6
+        self.kelp_factor = 0.4
         self.squidink_factor = 0.6
+        self.squidink_frequency = self.squidink_cooldown = 140
 
         # calculated resin std to be 1.4965920476507861 from provided data
-        self.resin_spread = 2
-        # self.resin_spread = 1.4965920476507861
-        self.kelp_spread = 0
-        self.squidink_spread = 2
+        self.kelp_mm_volume_threshold = 20
+        self.resin_spread = 1.4965920476507861
+        self.kelp_spread = 1
+        self.squidink_spread = 1
         # self.spread = 2
 
     # default_price should be set to the previous ema if available
@@ -190,14 +191,14 @@ class Trader:
 
         orders: List[Order] = []
 
-        orders.append(Order(RESIN, DEFAULT_PRICES[RESIN] - s, bid_volume))
-        orders.append(Order(RESIN, DEFAULT_PRICES[RESIN] + s, ask_volume))
-        # orders.append(
-        #     Order(RESIN, math.floor(storedData[RESIN]["ema"] - s), bid_volume // 2)
-        # )
-        # orders.append(
-        #     Order(RESIN, math.ceil(storedData[RESIN]["ema"] + s), ask_volume // 2)
-        # )
+        # orders.append(Order(RESIN, DEFAULT_PRICES[RESIN] - s, bid_volume))
+        # orders.append(Order(RESIN, DEFAULT_PRICES[RESIN] + s, ask_volume))
+        orders.append(
+            Order(RESIN, math.floor(storedData[RESIN]["ema"] - s), bid_volume // 2)
+        )
+        orders.append(
+            Order(RESIN, math.ceil(storedData[RESIN]["ema"] + s), ask_volume // 2)
+        )
 
         return orders
 
@@ -209,89 +210,51 @@ class Trader:
         ask_volume = -POSITION_LIMIT[KELP] - position
 
         orders: List[Order] = []
-        if position == 0:
-            orders.append(
-                Order(KELP, math.floor(storedData[KELP]["ema"] - s), bid_volume)
-            )
-            orders.append(
-                Order(KELP, math.ceil(storedData[KELP]["ema"] + s), ask_volume)
-            )
 
-        if position > 0:
-            # Long position
-            orders.append(
-                Order(
-                    KELP,
-                    math.floor(storedData[KELP]["ema"] - (2 * s)),
-                    bid_volume,
-                )
-            )
-            orders.append(Order(KELP, math.ceil(storedData[KELP]["ema"]), ask_volume))
-
-        if position < 0:
-            # Short position
-            orders.append(Order(KELP, math.floor(storedData[KELP]["ema"]), bid_volume))
-            orders.append(
-                Order(
-                    KELP,
-                    math.ceil(storedData[KELP]["ema"] + (2 * s)),
-                    ask_volume,
-                )
-            )
+        orders.append(
+            Order(KELP, math.floor(storedData[KELP]["fairprice"] - s), bid_volume // 2)
+        )
+        orders.append(
+            Order(KELP, math.ceil(storedData[KELP]["fairprice"] + s), ask_volume // 2)
+        )
 
         return orders
 
     def squidink_strat(self, state: TradingState, storedData):
-        position = state.position.get(SQUIDINK, 0)
-        s = self.squidink_spread
+        if self.squidink_cooldown > 0:
+            self.squidink_cooldown -= 1
+            return []
 
-        bid_volume = POSITION_LIMIT[SQUIDINK] - position
-        ask_volume = -POSITION_LIMIT[SQUIDINK] - position
+        # position = state.position.get(SQUIDINK, 0)
+        # s = self.squidink_spread
+
+        # bid_volume = POSITION_LIMIT[SQUIDINK] - position  # buy_volume
+        # ask_volume = -POSITION_LIMIT[SQUIDINK] - position  # sell_volume
 
         orders: List[Order] = []
+        order_depth = state.order_depths[SQUIDINK]
 
-        if position == 0:
-            orders.append(
-                Order(
-                    SQUIDINK,
-                    math.floor(storedData[SQUIDINK]["ema"] - s),
-                    bid_volume,
-                )
-            )
-            orders.append(
-                Order(
-                    SQUIDINK,
-                    math.ceil(storedData[SQUIDINK]["ema"] + s),
-                    ask_volume,
-                )
-            )
+        best_bid, best_ask = None, None
+        if order_depth.buy_orders:
+            best_bid = max(order_depth.buy_orders)
+        if order_depth.sell_orders:
+            best_ask = min(order_depth.sell_orders)
 
-        if position > 0:
-            # Long position
-            orders.append(
-                Order(
-                    SQUIDINK,
-                    math.floor(storedData[SQUIDINK]["ema"] - (2 * s)),
-                    bid_volume,
-                )
-            )
-            orders.append(
-                Order(SQUIDINK, math.ceil(storedData[SQUIDINK]["ema"]), ask_volume)
-            )
+        current_mprice = storedData[SQUIDINK]["midprice"]
+        prev_mprice = storedData[SQUIDINK]["prevN_midprice"]
+        buy_momentum = (current_mprice - 1.1 * prev_mprice) / self.squidink_frequency
+        sell_momentum = (current_mprice - prev_mprice) / self.squidink_frequency
+        if buy_momentum > 0 and storedData[SQUIDINK]["obv"] > 0:
+            # When momentum > 0 buy
+            volume = max(order_depth.sell_orders[best_ask], -5)  # example cap
+            orders.append(Order(SQUIDINK, best_ask, -volume))
+        elif sell_momentum < 0 and storedData[SQUIDINK]["obv"] < 0:
+            # When momentum < 0 sell
+            volume = min(order_depth.buy_orders[best_bid], 5)
+            orders.append(Order(SQUIDINK, best_bid, -volume))
 
-        if position < 0:
-            # Short position
-            orders.append(
-                Order(SQUIDINK, math.floor(storedData[SQUIDINK]["ema"]), bid_volume)
-            )
-            orders.append(
-                Order(
-                    SQUIDINK,
-                    math.ceil(storedData[SQUIDINK]["ema"] + (2 * s)),
-                    ask_volume,
-                )
-            )
-
+        self.squidink_cooldown = self.squidink_frequency
+        storedData[SQUIDINK]["prevN_midprice"] = current_mprice
         return orders
 
     # main trading function
@@ -305,13 +268,16 @@ class Trader:
             },
             KELP: {
                 "midprice": None,
+                "fairprice": None,
                 "ema": None,
                 "ema_factor": self.kelp_factor,
             },
             SQUIDINK: {
+                "prevN_midprice": None,
                 "midprice": None,
                 "ema": None,
-                "ema_factor": self.squidink_factor,
+                "ema_factor": self.kelp_factor,
+                "obv": 0,
             },
         }
         if state.traderData != "":
@@ -321,6 +287,9 @@ class Trader:
 
         # update midprice and exponential moving averages for each product
         for product in PRODUCTS:
+            # store data for all products
+            # - orderbook midprice
+            # - exponential moving average
             mid_price = self.get_mid_price(product, state)
             storedData[product]["midprice"] = mid_price
 
@@ -330,6 +299,62 @@ class Trader:
                 prevEma = storedData[product]["ema"]
                 k = storedData[product]["ema_factor"]
                 storedData[product]["ema"] = mid_price * k + prevEma * (1 - k)
+
+            if product == KELP:
+                # set fair price to mid price of orderbook by default.
+                storedData[product]["fairprice"] = storedData[product]["ema"]
+
+                order_depth = state.order_depths[product]
+                buys = sorted(order_depth.buy_orders.items(), reverse=True)
+                sells = sorted(order_depth.sell_orders.items())
+                mm_bid = next(
+                    (
+                        (price, vol)
+                        for price, vol in buys
+                        if vol >= self.kelp_mm_volume_threshold
+                    ),
+                    None,
+                )
+                mm_ask = next(
+                    (
+                        (price, vol)
+                        for price, vol in sells
+                        if vol >= self.kelp_mm_volume_threshold
+                    ),
+                    None,
+                )
+                if mm_bid and mm_ask:
+                    storedData[product]["fairprice"] = (mm_bid + mm_ask) / 2
+            elif product == SQUIDINK:
+                mid_price = self.get_mid_price(product, state)
+                prev_mid_price = storedData[product]["midprice"]
+
+                order_depth = state.order_depths[product]
+                if (
+                    prev_mid_price is not None
+                    and mid_price > prev_mid_price
+                    and order_depth.buy_orders
+                    and order_depth.sell_orders
+                ):
+                    volume = sum(order_depth.buy_orders.values()) - sum(
+                        order_depth.sell_orders.values()
+                    )
+                    storedData[product]["obv"] += volume
+                elif (
+                    prev_mid_price is not None
+                    and mid_price < prev_mid_price
+                    and order_depth.buy_orders
+                    and order_depth.sell_orders
+                ):
+                    # make volume account for other bot trades too
+                    volume = sum(order_depth.buy_orders.values()) - sum(
+                        order_depth.sell_orders.values()
+                    )
+                    storedData[product]["obv"] -= volume
+
+                storedData[product]["midprice"] = mid_price
+                if storedData[product]["prevN_midprice"] is None:
+                    storedData[product]["prevN_midprice"] = mid_price
 
         # get orders for each product
         result[RESIN] = self.resin_strat(state, storedData)
